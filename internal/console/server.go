@@ -36,7 +36,8 @@ func InitServer() {
 	//limiterMiddleware := middleware.RateLimiterMiddleware(redisClient)
 	//limiterMiddleware := middleware.RateLimitMiddlewareTimeRate()
 	//limiterMiddleware := middleware.RateLimitByUser()
-	limiterMiddleware := middleware.RateLimiterByUserMiddlewareV2()
+	ctx, cancel := context.WithCancel(ctx)
+	limiterMiddleware := middleware.RateLimiterByUserMiddlewareV2(ctx)
 
 	// add gin
 	app := gin.Default()
@@ -68,6 +69,7 @@ func InitServer() {
 			select {
 			case <-signalChan:
 				logrus.Info("receive signal interrupt ⚠️")
+				cancel()
 				_ = pubsubProvider.ShutDown()
 				ShutdownServer(ctx, &httpServer)
 				quitChan <- true

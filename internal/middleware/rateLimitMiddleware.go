@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
@@ -125,8 +126,8 @@ func RateLimitByUser() gin.HandlerFunc {
 	}
 }
 
-func RateLimiterByUserMiddlewareV2() gin.HandlerFunc {
-	go CleanUpUsers()
+func RateLimiterByUserMiddlewareV2(ctx context.Context) gin.HandlerFunc {
+	go CleanUpUsers(ctx)
 
 	return func(ctx *gin.Context) {
 		if !globalLimiter.Allow() {
@@ -164,8 +165,8 @@ func GetUserByIp(ip string) *UserLimiter {
 		mu.RUnlock()
 		return user
 	}
-
 	mu.RUnlock()
+
 	mu.Lock()
 	userLimiter := UserLimiter{
 		Limiter:  rate.NewLimiter(1, 1),
@@ -177,15 +178,90 @@ func GetUserByIp(ip string) *UserLimiter {
 }
 
 // CleanUpUsers is function to cleanup user ip and limiter data
-func CleanUpUsers() {
+func CleanUpUsers(ctx context.Context) {
 	for {
-		time.Sleep(10 * time.Second)
-		mu.Lock()
-		for ip, x := range Users {
-			if time.Since(x.LastSeen) >= 4*time.Second {
-				delete(Users, ip)
+		select {
+		case <-ctx.Done():
+			logrus.Info("function CleanUpUsers Stop ⚠️🛑")
+			return
+		default:
+			time.Sleep(10 * time.Second)
+			mu.Lock()
+			for ip, x := range Users {
+				if time.Since(x.LastSeen) >= 4*time.Second {
+					delete(Users, ip)
+				}
 			}
+			mu.Unlock()
 		}
-		mu.Unlock()
+	}
+}
+
+// RateLimiterByUserMiddlewarev3 is function to get middleware rate limiter combine global and per user
+func RateLimiterByUserMiddlewarev3() gin.HandlerFunc {
+	go CleanUpUsers(context.Background())
+
+	return func(context *gin.Context) {
+		if !globalLimiter.Allow() {
+			statusCode := http.StatusTooManyRequests
+			context.JSON(statusCode, gin.H{
+				"message": "too many request",
+			})
+			context.Abort()
+			return
+		}
+
+		// check limiter by ip
+		userLimiter := GetUserByIp(context.ClientIP())
+		if !userLimiter.Limiter.Allow() {
+			statusCode := http.StatusTooManyRequests
+			context.JSON(statusCode, gin.H{
+				"message": "too many request per user",
+			})
+			context.Abort()
+			return
+		}
+
+		// pass limiter
+		context.Next()
+		return
+	}
+}
+
+func GetUserLimiterByIpV2(ip string) *UserLimiter {
+	// get user in map
+	mu.RLock()
+	if user, ok := Users[ip]; ok {
+		mu.RUnlock()
+		return user
+	}
+	mu.RUnlock()
+
+	// insert new to map
+	userLim := UserLimiter{
+		Limiter:  rate.NewLimiter(1, 1),
+		LastSeen: time.Now(),
+	}
+	mu.Lock()
+	Users[ip] = &userLim
+	mu.Unlock()
+	return &userLim
+}
+
+func CleanUpUsersV2(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			time.Sleep(1 * time.Minute)
+			mu.Lock()
+			for ip, lim := range Users {
+				if time.Since(lim.LastSeen) > 5*time.Second {
+					delete(Users, ip)
+				}
+			}
+			mu.Unlock()
+		}
 	}
 }
