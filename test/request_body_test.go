@@ -3,6 +3,7 @@ package test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
@@ -22,4 +23,21 @@ func TestGetRequestBody(t *testing.T) {
 	json.Unmarshal(reqJson, &request)
 
 	fmt.Println(request)
+}
+
+func TestRequestBodyWithNull(t *testing.T) {
+	requestBody := `{
+		"phone_number" : "083863890419",
+		"email" : null 
+	}`
+
+	var req RequestBody
+	err := json.Unmarshal([]byte(requestBody), &req)
+	assert.Nil(t, err)
+
+	fmt.Println(req)
+
+	reqJson, _ := json.Marshal(&req)
+	fmt.Println(string(reqJson))
+
 }
